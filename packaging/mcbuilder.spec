@@ -1,9 +1,20 @@
 # -*- mode: python ; coding: utf-8 -*-
-"""One-file Windows build.
+"""Windows build, in one-file or one-folder form.
 
-Console mode is mandatory: the tool prompts with input() during setup and
-prints progress while building, none of which exists in a windowed build.
+Set MCBUILDER_ONEFILE=0 for the folder build. Both are shipped because a
+one-file executable unpacks itself into %TEMP% on every launch and runs from
+there, which antivirus software blocks often enough to matter -- and when it
+does, the program dies before it can print anything. The folder build has no
+extraction step, so it is the fallback when the single file will not start.
+
+Console mode is mandatory either way: the tool prompts with input() during
+setup and prints progress while building, none of which exists in a windowed
+build.
 """
+
+import os
+
+ONEFILE = os.environ.get("MCBUILDER_ONEFILE", "1") != "0"
 
 a = Analysis(
     ["entry.py"],
@@ -31,18 +42,12 @@ a = Analysis(
 
 pyz = PYZ(a.pure)
 
-exe = EXE(
-    pyz,
-    a.scripts,
-    a.binaries,
-    a.datas,
-    [],
+common = dict(
     name="mcbuilder",
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
     upx=False,
-    runtime_tmpdir=None,
     console=True,
     disable_windowed_traceback=False,
     argv_emulation=False,
@@ -50,3 +55,18 @@ exe = EXE(
     codesign_identity=None,
     entitlements_file=None,
 )
+
+if ONEFILE:
+    exe = EXE(pyz, a.scripts, a.binaries, a.datas, [], runtime_tmpdir=None, **common)
+else:
+    # The folder build keeps binaries and data beside the launcher instead of
+    # bundling them inside it, so nothing is written to %TEMP% at startup.
+    exe = EXE(pyz, a.scripts, [], exclude_binaries=True, **common)
+    coll = COLLECT(
+        exe,
+        a.binaries,
+        a.datas,
+        strip=False,
+        upx=False,
+        name="mcbuilder",
+    )

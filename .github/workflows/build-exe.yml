@@ -35,9 +35,21 @@ jobs:
       - name: Test
         run: python -m pytest -q
 
-      - name: Build
+      - name: Build (one file)
         working-directory: packaging
+        env:
+          MCBUILDER_ONEFILE: "1"
         run: python -m PyInstaller --clean --noconfirm mcbuilder.spec
+
+      - name: Build (one folder)
+        working-directory: packaging
+        env:
+          MCBUILDER_ONEFILE: "0"
+        run: |
+          # --distpath keeps this out of the way of the one-file build, whose
+          # dist/mcbuilder.exe would otherwise be overwritten by the folder.
+          python -m PyInstaller --clean --noconfirm --distpath distdir mcbuilder.spec
+          Compress-Archive -Path distdir\mcbuilder -DestinationPath dist\mcbuilder-folder.zip -Force
 
       - name: Smoke test the executable
         # A green test suite says nothing about whether the bundle resolves
@@ -63,10 +75,19 @@ jobs:
           # only for a double-clicked window.
           if ($out -match 'Press Enter') { throw "the .exe paused despite being run from a shell" }
 
+          # The folder build is a separate artifact and can break on its own,
+          # so it gets its own run rather than riding on the one-file result.
+          $dirExe = ".\packaging\distdir\mcbuilder\mcbuilder.exe"
+          $out = & $dirExe plan smoke.png --width 16 -x 0 -y 64 -z 0 2>&1 | Out-String
+          if ($LASTEXITCODE -ne 0) { throw "folder build failed with $LASTEXITCODE" }
+          if ($out -notmatch 'hotbar:') { throw "unexpected folder-build output:`n$out" }
+
       - uses: actions/upload-artifact@v4
         with:
           name: mcbuilder-windows
-          path: packaging/dist/mcbuilder.exe
+          path: |
+            packaging/dist/mcbuilder.exe
+            packaging/dist/mcbuilder-folder.zip
 
       - name: Publish release
         # Always runs; the script decides whether there is anything to do.
@@ -87,7 +108,9 @@ jobs:
             exit 0
           }
 
-          gh release create $tag packaging/dist/mcbuilder.exe `
+          gh release create $tag `
+            packaging/dist/mcbuilder.exe `
+            packaging/dist/mcbuilder-folder.zip `
             --target $env:GITHUB_SHA `
             --title "mcbuilder $tag" `
             --notes-file packaging/release-notes.md
