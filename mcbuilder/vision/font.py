@@ -20,16 +20,49 @@ from pathlib import Path
 
 import numpy as np
 
-# Foreground threshold. Minecraft draws F3 text bright on a translucent dark
-# panel, with a ~25%-brightness drop shadow one pixel down-right. A high cut
-# keeps the glyph body and discards the shadow, which would otherwise fatten
-# every character and break exact matching.
-LUMA_THRESHOLD = 140
+# Minecraft draws F3 text in pure white on a translucent dark panel, with a
+# ~25%-brightness drop shadow one pixel down-right.
+#
+# Brightness alone is not enough to find it. A daytime sky sits around 197 and
+# clouds higher still, so a low cut turns the whole capture into one solid
+# blob and line detection collapses. Requiring near-white rejects the sky, and
+# requiring something dark nearby rejects white terrain: the shadow and the
+# panel guarantee a dark pixel within a couple of pixels of every glyph, while
+# an expanse of snow or cloud has none.
+BRIGHT_THRESHOLD = 200
+SHADOW_THRESHOLD = 110
+NEIGHBOURHOOD = 5
+
+# Kept as an alias: the old name appears in saved settings and in the docs.
+LUMA_THRESHOLD = BRIGHT_THRESHOLD
 
 
-def to_mask(rgb: np.ndarray) -> np.ndarray:
-    luma = rgb.astype(np.float64) @ np.array([0.299, 0.587, 0.114])
-    return luma >= LUMA_THRESHOLD
+def luminance(rgb: np.ndarray) -> np.ndarray:
+    return rgb.astype(np.float64) @ np.array([0.299, 0.587, 0.114])
+
+
+def _local_min(a: np.ndarray, size: int = NEIGHBOURHOOD) -> np.ndarray:
+    """Minimum over a square window, without pulling in scipy."""
+    pad = size // 2
+    padded = np.pad(a, pad, mode="edge")
+    out = padded[pad : pad + a.shape[0], pad : pad + a.shape[1]].copy()
+    for dy in range(size):
+        for dx in range(size):
+            out = np.minimum(out, padded[dy : dy + a.shape[0], dx : dx + a.shape[1]])
+    return out
+
+
+def to_mask(rgb: np.ndarray, threshold: int | None = None) -> np.ndarray:
+    """Pixels belonging to F3 glyph bodies.
+
+    A pixel qualifies when it is near-white *and* something dark sits within a
+    few pixels of it. The drop shadow supplies that dark pixel for essentially
+    every glyph pixel, so glyph shapes survive intact, while bright scenery
+    with no dark neighbour is discarded.
+    """
+    bright = threshold if threshold is not None else BRIGHT_THRESHOLD
+    luma = luminance(rgb)
+    return (luma >= bright) & (_local_min(luma) <= SHADOW_THRESHOLD)
 
 
 def _runs(flags: np.ndarray, max_gap: int = 0) -> list[tuple[int, int]]:
@@ -166,9 +199,20 @@ class FontModel:
             chars.append(self._match(glyph))
         return "".join(chars)
 
-    def read_all(self, rgb: np.ndarray) -> list[str]:
-        mask = to_mask(rgb)
+    def read_all(self, rgb: np.ndarray, threshold: int | None = None) -> list[str]:
+        mask = to_mask(rgb, threshold)
         return [self.read_line(mask, a, b) for a, b in find_lines(mask)]
+
+    # --- coverage -----------------------------------------------------------
+
+    # Everything the XYZ and Facing lines can contain numerically. A glyph
+    # that was never taught reads as '?', which discards the whole line, so a
+    # digit missing from the sample coordinates turns into an unexplained
+    # hang the first time the player walks somewhere that uses it.
+    REQUIRED = set("0123456789.-/")
+
+    def missing_glyphs(self) -> set[str]:
+        return self.REQUIRED - set(self.templates)
 
     # --- persistence --------------------------------------------------------
 

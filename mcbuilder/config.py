@@ -25,6 +25,7 @@ class Settings:
     deg_per_count_x: float = 0.0
     deg_per_count_y: float = 0.0
     screen_size: tuple[int, int] = (0, 0)
+    bright_threshold: int = 200
 
     @property
     def calibrated(self) -> bool:
@@ -44,4 +45,5 @@ class Settings:
             deg_per_count_x=float(blob.get("deg_per_count_x", 0.0)),
             deg_per_count_y=float(blob.get("deg_per_count_y", 0.0)),
             screen_size=tuple(blob.get("screen_size", (0, 0))),  # type: ignore[arg-type]
+            bright_threshold=int(blob.get("bright_threshold", 200)),
         )

@@ -153,3 +153,68 @@ def test_save_and_load_preserves_recognition(tmp_path):
     reloaded = FontModel.load(path)
     assert reloaded.space_gap == font.space_gap
     assert reloaded.read_line(mask, top, bottom) == text
+
+
+SKY = (184, 200, 216)  # a daytime sky: bright, but not white
+PANEL = (60, 60, 70)   # the translucent dark strip Minecraft draws behind F3
+
+
+def render_on_sky(text: str) -> np.ndarray:
+    """Text over bright scenery, the way it actually looks in the sky."""
+    glyphs = render(text)
+    out = np.empty_like(glyphs)
+    out[:, :] = SKY
+    out[PAD - 1 : PAD + 6, :] = PANEL
+    lit = glyphs.sum(axis=2) > 0
+    out[lit] = glyphs[lit]
+    return out
+
+
+def test_bright_sky_is_not_mistaken_for_text():
+    # The original threshold was 140; a daytime sky is around 197, so the
+    # whole capture came back as one solid blob and line detection collapsed.
+    mask = to_mask(render_on_sky("XYZ: 129.138"))
+    lines = find_lines(mask)
+    assert len(lines) == 1
+    # Only the glyphs survive -- not the sky, not the panel.
+    assert mask.sum() == sum(
+        row.count("1") for ch in "XYZ129138" for row in GLYPHS[ch]
+    ) + sum(row.count("1") for ch in ":." for row in GLYPHS[ch])
+
+
+def test_solid_white_scenery_is_rejected():
+    # Snow or cloud: bright everywhere, but with no dark pixel anywhere near,
+    # so the shadow test throws it out.
+    assert to_mask(np.full((20, 40, 3), 255, dtype=np.uint8)).sum() == 0
+
+
+def test_reading_still_works_over_a_bright_background():
+    font = FontModel()
+    text = "XYZ: 129.138 / 64.0 / -102.924"
+    mask = to_mask(render_on_sky(text))
+    (top, bottom), = find_lines(mask)
+    font.learn_line(mask, top, bottom, text)
+    assert font.read_line(mask, top, bottom) == text
+
+
+def test_missing_digits_are_reported():
+    # These are real coordinates that contain no 5 anywhere. Without a
+    # warning, the first coordinate using one would stall the build with no
+    # explanation.
+    font = FontModel()
+    # (the stand-in font has no letters beyond XYZ, so the Facing line's
+    # numbers stand in for it here)
+    for text in ("XYZ: 129.138 / 64.00000 / -102.924", "XYZ: -98.9 / 17.4"):
+        mask = to_mask(render_on_sky(text))
+        (top, bottom), = find_lines(mask)
+        font.learn_line(mask, top, bottom, text)
+    assert font.missing_glyphs() == {"5"}
+
+
+def test_no_missing_glyphs_once_every_digit_is_seen():
+    font = FontModel()
+    text = "XYZ: 0123456789 / -. /"
+    mask = to_mask(render_on_sky(text))
+    (top, bottom), = find_lines(mask)
+    font.learn_line(mask, top, bottom, text)
+    assert font.missing_glyphs() == set()

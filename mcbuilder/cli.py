@@ -93,12 +93,13 @@ def cmd_learn_font(args) -> int:
         settings.region = tuple(int(v) for v in args.region.split(","))  # type: ignore
 
     capture = ScreenCapture(settings.region)
+    threshold = args.threshold or settings.bright_threshold
     print("Open Minecraft, press F3, and make sure the debug text is visible.")
     input(f"Capturing region {settings.region} in 3 seconds -- press Enter when ready. ")
     time.sleep(3)
 
     rgb = capture.grab()
-    mask = to_mask(rgb)
+    mask = to_mask(rgb, threshold)
     lines = find_lines(mask)
     if not lines:
         print(
@@ -112,8 +113,22 @@ def cmd_learn_font(args) -> int:
     from PIL import Image
 
     Image.fromarray(rgb).save(debug)
-    print(f"\nCaptured {len(lines)} line(s); saved to {debug} so you can read them.")
-    print("Type each line EXACTLY as it appears (Enter alone to skip).\n")
+    # The mask is what actually gets read; seeing it is the only way to tell a
+    # bad capture region or threshold from a bad font.
+    mask_path = debug.with_name(debug.stem + "_mask.png")
+    Image.fromarray((mask * 255).astype("uint8"), mode="L").save(mask_path)
+    print(f"\nCaptured {len(lines)} line(s).")
+    print(f"  {debug}       what was on screen")
+    print(f"  {mask_path}  what the reader detected as text")
+    print()
+    print("You only need the 'XYZ:' line and the 'Facing:' line -- press Enter")
+    print("to skip the rest. Type them EXACTLY as they appear, including the")
+    print("slashes and minus signs.")
+    print()
+    print("One catch: only digits you type here can ever be read back. If your")
+    print("coordinates are missing a digit, teach one more line that has it;")
+    print("any line will do. You will be told which are missing at the end.")
+    print()
 
     font = FontModel.load(config.FONT_PATH) if config.FONT_PATH.exists() else FontModel()
     learned = 0
@@ -132,7 +147,16 @@ def cmd_learn_font(args) -> int:
         print("Nothing learned.", file=sys.stderr)
         return 1
 
+    missing = font.missing_glyphs()
+    if missing:
+        print()
+        print(f"  WARNING: never saw {' '.join(sorted(missing))}")
+        print("  Coordinates containing those cannot be read, and the build will")
+        print("  stall when it hits one. Run learn-font again and teach a line")
+        print("  that contains them -- the memory or framerate lines usually do.")
+
     font.save(config.FONT_PATH)
+    settings.bright_threshold = threshold
     try:
         import mss
 
@@ -162,9 +186,10 @@ def cmd_probe(args) -> int:
         settings.region = tuple(int(v) for v in args.region.split(","))  # type: ignore
     font = FontModel.load(config.FONT_PATH)
     capture = ScreenCapture(settings.region)
+    threshold = args.threshold or settings.bright_threshold
 
     for _ in range(args.count):
-        lines = font.read_all(capture.grab())
+        lines = font.read_all(capture.grab(), threshold)
         print("--- overlay ---")
         for line in lines:
             print(f"  {line}")
@@ -315,12 +340,14 @@ def build_parser() -> argparse.ArgumentParser:
     sp = sub.add_parser("learn-font", help="teach the reader Minecraft's F3 font (one-time)")
     sp.add_argument("--region", default=None, help="LEFT,TOP,WIDTH,HEIGHT of the F3 text")
     sp.add_argument("--debug-image", default="f3_capture.png")
+    sp.add_argument("--threshold", type=int, default=None, help="brightness cut for text (default 200)")
     sp.set_defaults(func=cmd_learn_font)
 
     sp = sub.add_parser("probe", help="show what the reader currently sees on the F3 overlay")
     sp.add_argument("--region", default=None)
     sp.add_argument("--count", type=int, default=3)
     sp.add_argument("--interval", type=float, default=1.0)
+    sp.add_argument("--threshold", type=int, default=None)
     sp.set_defaults(func=cmd_probe)
 
     sp = sub.add_parser("calibrate", help="measure mouse sensitivity (one-time per settings change)")
