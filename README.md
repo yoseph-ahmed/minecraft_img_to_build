@@ -51,13 +51,27 @@ That has three consequences worth knowing before you start:
   precondition; nothing checks the world for you, so uneven ground means a
   failed bottom row.
 
-## Setup
+## Getting it
+
+**Download the executable** from the
+[Releases page](https://github.com/yoseph-ahmed/minecraft_img_to_build/releases)
+— one file, no Python needed. Double-click it for a guided menu, or run it
+from a terminal for the full command line (`mcbuilder.exe --help`).
+
+Windows SmartScreen warns about any unsigned download: **More info** →
+**Run anyway**.
+
+Or from source, if you have a working Python 3.10+:
 
 ```powershell
-py -m pip install -e .
+py -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install -e .
 ```
 
-Then, in Minecraft:
+## Setup
+
+In Minecraft:
 
 - Creative mode, and stand where you want to build.
 - **Raw input on** (Options → Controls → Mouse Settings).
@@ -67,7 +81,7 @@ Then, in Minecraft:
 - Press **F3** so the debug overlay is visible, and leave it up.
 
 Two one-time steps, both of which need redoing if you change resolution or GUI
-scale:
+scale — these are options 1–3 in the menu, or:
 
 ```powershell
 mcbuilder learn-font    # type out the F3 lines it captures
@@ -118,10 +132,22 @@ Useful flags:
 `mcbuilder blocks` lists the 80 blocks available. They are all full, opaque,
 non-gravity cubes — sand and concrete powder would fall out of the mural.
 
+## Building the executable yourself
+
+`.github/workflows/build-exe.yml` builds it on a Windows runner with
+PyInstaller, smoke-tests the result and attaches it to a release on any `v*`
+tag. Locally:
+
+```powershell
+python -m pip install pyinstaller
+cd packaging
+python -m PyInstaller --clean --noconfirm mcbuilder.spec
+```
+
 ## Tests
 
 ```powershell
-py -m pytest
+python -m pytest
 ```
 
 The image pipeline, planner, overlay parser, font learner and build

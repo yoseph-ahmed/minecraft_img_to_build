@@ -1,0 +1,63 @@
+name: build-exe
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          # Not the newest release on purpose: the build only needs a version
+          # every dependency already ships wheels for, so nothing has to be
+          # compiled on the runner.
+          python-version: "3.12"
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e . pytest pyinstaller
+
+      - name: Test
+        run: python -m pytest -q
+
+      - name: Build
+        working-directory: packaging
+        run: python -m PyInstaller --clean --noconfirm mcbuilder.spec
+
+      - name: Smoke test the executable
+        # `blocks` needs no game, no screen and no config, so it is the one
+        # command that proves the bundle actually runs on a clean machine.
+        run: |
+          .\packaging\dist\mcbuilder.exe blocks | Select-Object -Last 2
+          if ($LASTEXITCODE -ne 0) { throw "executable failed with $LASTEXITCODE" }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mcbuilder-windows
+          path: packaging/dist/mcbuilder.exe
+
+      - name: Publish release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$env:GITHUB_REF_NAME" `
+            packaging/dist/mcbuilder.exe `
+            --title "mcbuilder $env:GITHUB_REF_NAME" `
+            --notes "Download ``mcbuilder.exe`` and run it. No Python needed.
+
+          Windows SmartScreen will warn about an unsigned download: choose
+          **More info** then **Run anyway**.
+
+          Double-click for a guided menu, or run it from a terminal for the
+          full command line (``mcbuilder.exe --help``)."

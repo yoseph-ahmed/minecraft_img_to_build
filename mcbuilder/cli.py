@@ -341,12 +341,34 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
+    from . import interactive
+
+    if interactive.should_run(argv):
+        return interactive.run(main)
+
     args = build_parser().parse_args(argv)
     logging.basicConfig(
         level=logging.DEBUG if args.verbose else logging.INFO,
         format="%(levelname)s %(name)s: %(message)s",
     )
     return args.func(args)
+
+
+def frozen_main() -> int:
+    """Entry point for the packaged .exe.
+
+    A double-clicked console program closes the instant it returns, taking any
+    error message with it. When there is no parent terminal to fall back to,
+    hold the window open so whatever happened can actually be read.
+    """
+    try:
+        return main()
+    finally:
+        if getattr(sys, "frozen", False):
+            try:
+                input("\nPress Enter to close. ")
+            except (EOFError, KeyboardInterrupt):
+                pass
 
 
 if __name__ == "__main__":
