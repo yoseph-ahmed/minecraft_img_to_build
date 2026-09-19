@@ -35,11 +35,28 @@ jobs:
         run: python -m PyInstaller --clean --noconfirm mcbuilder.spec
 
       - name: Smoke test the executable
-        # `blocks` needs no game, no screen and no config, so it is the one
-        # command that proves the bundle actually runs on a clean machine.
+        # A green test suite says nothing about whether the bundle resolves
+        # its imports on a machine without Python, so the built .exe has to
+        # actually run. `plan` is the deepest command that needs no game and
+        # no screen: it exercises numpy and Pillow for real, which are the
+        # dependencies most likely to be mis-bundled.
         run: |
-          .\packaging\dist\mcbuilder.exe blocks | Select-Object -Last 2
-          if ($LASTEXITCODE -ne 0) { throw "executable failed with $LASTEXITCODE" }
+          $exe = ".\packaging\dist\mcbuilder.exe"
+
+          python -c "from PIL import Image; Image.new('RGB', (32, 32), (200, 40, 40)).save('smoke.png')"
+
+          $out = & $exe blocks 2>&1 | Out-String
+          if ($LASTEXITCODE -ne 0) { throw "blocks failed with $LASTEXITCODE" }
+          if ($out -notmatch 'blocks available') { throw "unexpected blocks output:`n$out" }
+
+          $out = & $exe plan smoke.png --width 16 -x 0 -y 64 -z 0 2>&1 | Out-String
+          if ($LASTEXITCODE -ne 0) { throw "plan failed with $LASTEXITCODE" }
+          if ($out -notmatch 'hotbar:') { throw "unexpected plan output:`n$out" }
+          Write-Host $out
+
+          # Running with arguments must not stop for input; that prompt is
+          # only for a double-clicked window.
+          if ($out -match 'Press Enter') { throw "the .exe paused despite being run from a shell" }
 
       - uses: actions/upload-artifact@v4
         with:

@@ -354,17 +354,38 @@ def main(argv: list[str] | None = None) -> int:
     return args.func(args)
 
 
+def _owns_console() -> bool:
+    """True when this process is the only one attached to its console.
+
+    That is what distinguishes a double-click, where Windows created a console
+    just for us and will destroy it the moment we exit, from being run inside
+    an existing PowerShell or cmd window, where the output stays on screen.
+    Pausing in the second case would make the tool unusable from a terminal
+    and unscriptable in CI.
+    """
+    if not getattr(sys, "frozen", False):
+        return False
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        buf = (wintypes.DWORD * 8)()
+        return kernel32.GetConsoleProcessList(buf, len(buf)) == 1
+    except Exception:  # noqa: BLE001 - no console, or not Windows
+        return False
+
+
 def frozen_main() -> int:
     """Entry point for the packaged .exe.
 
     A double-clicked console program closes the instant it returns, taking any
-    error message with it. When there is no parent terminal to fall back to,
-    hold the window open so whatever happened can actually be read.
+    error message with it, so in that case the window is held open.
     """
     try:
         return main()
     finally:
-        if getattr(sys, "frozen", False):
+        if _owns_console():
             try:
                 input("\nPress Enter to close. ")
             except (EOFError, KeyboardInterrupt):

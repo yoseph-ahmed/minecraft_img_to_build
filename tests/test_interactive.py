@@ -112,3 +112,24 @@ def test_argparse_exit_does_not_kill_the_menu(monkeypatch, capsys):
     scripted(monkeypatch, ["6", "0"])
     assert interactive.run(bail) == 0
     assert "exit 2" in capsys.readouterr().out
+
+
+def test_pause_check_is_false_when_not_frozen(monkeypatch):
+    # Running from source must never pause, whatever the console looks like.
+    import sys
+
+    from mcbuilder import cli
+
+    monkeypatch.delattr(sys, "frozen", raising=False)
+    assert cli._owns_console() is False
+
+
+def test_pause_check_is_false_off_windows(monkeypatch):
+    # Frozen but with no Windows console API available: fall through rather
+    # than raise, so a packaged build on another platform still exits.
+    import sys
+
+    from mcbuilder import cli
+
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    assert cli._owns_console() is False
