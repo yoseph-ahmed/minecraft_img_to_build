@@ -5,6 +5,11 @@ on:
     branches: [main]
     tags: ["v*"]
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Publish a release at this tag, e.g. v0.1.0. Blank = build only."
+        required: false
+        default: ""
 
 permissions:
   contents: write
@@ -64,17 +69,25 @@ jobs:
           path: packaging/dist/mcbuilder.exe
 
       - name: Publish release
-        if: startsWith(github.ref, 'refs/tags/v')
+        # Always runs; the script decides whether there is anything to do.
+        # Deciding in PowerShell rather than an `if:` expression sidesteps the
+        # null-versus-empty-string difference between a tag push and a manual
+        # run. With --target, gh creates the tag too, so a release can be cut
+        # without pushing one.
         env:
           GH_TOKEN: ${{ github.token }}
+          INPUT_TAG: ${{ github.event.inputs.release_tag }}
         run: |
-          gh release create "$env:GITHUB_REF_NAME" `
-            packaging/dist/mcbuilder.exe `
-            --title "mcbuilder $env:GITHUB_REF_NAME" `
-            --notes "Download ``mcbuilder.exe`` and run it. No Python needed.
+          $tag = "$env:INPUT_TAG".Trim()
+          if (-not $tag -and $env:GITHUB_REF -like "refs/tags/v*") {
+            $tag = $env:GITHUB_REF_NAME
+          }
+          if (-not $tag) {
+            Write-Host "No tag requested; build-only run."
+            exit 0
+          }
 
-          Windows SmartScreen will warn about an unsigned download: choose
-          **More info** then **Run anyway**.
-
-          Double-click for a guided menu, or run it from a terminal for the
-          full command line (``mcbuilder.exe --help``)."
+          gh release create $tag packaging/dist/mcbuilder.exe `
+            --target $env:GITHUB_SHA `
+            --title "mcbuilder $tag" `
+            --notes-file packaging/release-notes.md
